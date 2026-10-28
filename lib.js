@@ -7,7 +7,9 @@
 
   const FOOT_STRONG = /foot|soccer|f[uú]t[eb]ol|calcio|fu(?:ß|ss)ball|voetbal|\bliga\b|laliga|ligue ?1|ligue ?2|premier league|serie ?a|bundesliga|uefa|fifa|champions league|europa league|bein|dazn|sky sport|supersport|sport ?tv|eleven sports|canal\+ ?foot|ol tv|om tv|psg tv|barça|barca tv|real madrid tv|benfica tv|sporting tv|mu ?tv|chelsea tv|lfc tv|arsenal tv|bayern/i;
   const FOOT_TEAMS = /\b(inter|milan|ajax|juventus|napoli|roma|lazio|marseille|lyon|monaco|psg|liverpool|manchester|arsenal|chelsea|tottenham|galatasaray|fenerbah|be[sş]ikta[sş]|porto|ol)\b/i;
-  const ISLES = /mayotte|maore|kwezi|comor|ortc|watwan|anjouan|moroni/i;
+  // Pays conservés : France (et territoires français) et États-Unis (anglophone). Modifiable ici.
+  const FR_SET = new Set(['FR', 'YT', 'RE', 'GP', 'MQ', 'GF', 'PM', 'NC', 'PF', 'WF', 'BL', 'MF']);
+  const KEEP = new Set([...FR_SET, 'US']);
 
   const flagOf = cc => cc.replace(/./g, ch => String.fromCodePoint(127397 + ch.charCodeAt(0)));
   let regionName = null; try { regionName = new Intl.DisplayNames(['fr'], { type: 'region' }); } catch (e) {}
@@ -44,6 +46,7 @@
       const id = tid || (custom ? 'c:' : 'n:') + norm(title);
       let cc = ((tid.match(/\.([a-z]{2})$/i) || [])[1] || '').toUpperCase();
       if (cc === 'UK') cc = 'GB';
+      if (!custom && !KEEP.has(cc)) continue;
       let c = map.get(id);
       if (!c) map.set(id, c = { id, n: title, a: '', c: cc, k: [], l: e.attrs['tvg-logo'] || '', u: [], q: [], fb: false });
       if (!c.q) c.q = c.u.map(() => 0);
@@ -61,7 +64,7 @@
       const ord = c.u.map((_, i) => i).sort((a, b) => q[b] - q[a]).slice(0, 4);
       c.u = ord.map(i => c.u[i]); delete c.q;
       c.fb = FOOT_STRONG.test(c.n) || (c.k.includes('sports') && FOOT_TEAMS.test(c.n));
-      c.is = c.c === 'YT' || c.c === 'KM' || ISLES.test(c.n);
+      c.g = c.c === 'US' ? 'us' : FR_SET.has(c.c) ? 'fr' : '';
       out.push(c);
     }
     out.sort((a, b) => a.n.localeCompare(b.n, 'fr'));
