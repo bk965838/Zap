@@ -1,6 +1,6 @@
 // Service worker : fait démarrer l'app instantanément et la rend utilisable pour l'interface hors ligne.
 // Les flux vidéo et les données de chaînes ne passent jamais par ici.
-const VERSION = 'zap-v1';
+const VERSION = 'zap-v2';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

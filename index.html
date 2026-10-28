@@ -124,6 +124,8 @@ video::cue{font-size:1.1em;background:rgba(0,0,0,.72);color:#fff}
   <div class="foot" id="foot" hidden>
     <button id="reload">Actualiser la liste</button>
     <button id="unhide">Réafficher les chaînes masquées</button>
+    <button id="addList">Ajouter une playlist</button>
+    <button id="delLists" hidden>Retirer mes playlists</button>
   </div>
 </main>
 
@@ -147,7 +149,7 @@ video::cue{font-size:1.1em;background:rgba(0,0,0,.72);color:#fff}
 
 <script>
 'use strict';
-const API = 'https://iptv-org.github.io/api/';
+const PLAYLIST = 'https://iptv-org.github.io/iptv/index.m3u';
 const HLS_CDN = 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -161,7 +163,9 @@ const ls = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 };
 const favs = new Set(ls.get('zap.favs', []));
-const bad  = new Set(ls.get('zap.bad', []));
+// Chaînes en échec : masquées 7 jours, puis réessayées automatiquement
+const bad  = new Map(Object.entries(ls.get('zap.bad2', {})).filter(([, t]) => Date.now() - t < 6048e5));
+const saveBad = () => ls.set('zap.bad2', Object.fromEntries(bad));
 const idb = () => new Promise((res, rej) => { const r = indexedDB.open('zap', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 async function kvGet(k) { try { const d = await idb(); return await new Promise(r => { const q = d.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); } catch { return null; } }
 async function kvSet(k, v) { try { const d = await idb(); await new Promise(r => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = r; t.onerror = r; }); } catch {} }
@@ -171,43 +175,69 @@ const state = { data: null, cat: 'all', country: '', q: '', shown: 0 };
 const byId = new Map();
 const PAGE = 72;
 
-const getJSON = async n => { const r = await fetch(API + n + '.json', { cache: 'no-cache' }); if (!r.ok) throw new Error(n + ' ' + r.status); return r.json(); };
+const FOOT_STRONG = /foot|soccer|f[uú]t[eb]ol|calcio|fu(?:ß|ss)ball|voetbal|\bliga\b|laliga|ligue ?1|ligue ?2|premier league|serie ?a|bundesliga|uefa|fifa|champions league|europa league|bein|dazn|sky sport|supersport|sport ?tv|eleven sports|canal\+ ?foot|ol tv|om tv|psg tv|barça|barca tv|real madrid tv|benfica tv|sporting tv|mu ?tv|chelsea tv|lfc tv|arsenal tv|bayern/i;
+const flagOf = cc => cc.replace(/./g, ch => String.fromCodePoint(127397 + ch.charCodeAt(0)));
+let regionName = null; try { regionName = new Intl.DisplayNames(['fr'], { type: 'region' }); } catch {}
+
+function parseM3U(text, custom) {
+  const out = []; let cur = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim(); if (!line) continue;
+    if (line.startsWith('#EXTINF')) {
+      const attrs = {};
+      line.replace(/([\w-]+)="([^"]*)"/g, (_, k, v) => { attrs[k] = v; return ''; });
+      const bare = line.replace(/"[^"]*"/g, '');
+      cur = { attrs, name: bare.slice(bare.lastIndexOf(',') + 1).trim(), ref: false };
+    } else if (line.startsWith('#EXTVLCOPT')) {
+      if (cur && /referrer|user-agent/i.test(line)) cur.ref = true;
+    } else if (line[0] === '#') continue;
+    else if (cur) { cur.url = line; out.push(cur); cur = null; }
+  }
+  return out;
+}
+
+function addEntries(map, entries, custom) {
+  for (const e of entries) {
+    // Uniquement des flux utilisables partout : HTTPS, sans en-tête spécial, ni géo-bloqués, ni "pas 24/7"
+    if (!e.url || !e.url.startsWith('https://') || e.ref) continue;
+    if (/geo.?block|g[eé]o.?restrict|not 24\/7/i.test(e.name)) continue;
+    const k = (e.attrs['group-title'] || '').split(';').map(s => s.trim().toLowerCase()).filter(x => x && x !== 'undefined');
+    if (k.includes('xxx')) continue;
+    const title = e.name.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim();
+    if (!title) continue;
+    const q = parseInt((e.name.match(/\((\d{3,4})p\)/) || [])[1]) || 0;
+    const tid = (e.attrs['tvg-id'] || '').split('@')[0];
+    const id = tid || (custom ? 'c:' : 'n:') + norm(title);
+    let cc = (tid.match(/\.([a-z]{2})$/i) || [])[1] || '';
+    cc = cc.toUpperCase(); if (cc === 'UK') cc = 'GB';
+    let c = map.get(id);
+    if (!c) map.set(id, c = { id, n: title, a: '', c: cc, k: [], l: e.attrs['tvg-logo'] || '', u: [], q: [], fb: false });
+    if (!c.u.includes(e.url)) { c.u.push(e.url); c.q.push(q); }
+    for (const x of k) if (!c.k.includes(x)) c.k.push(x);
+    if (!c.l && e.attrs['tvg-logo']) c.l = e.attrs['tvg-logo'];
+  }
+}
+
+async function fetchText(u) { const r = await fetch(u, { cache: 'no-cache' }); if (!r.ok) throw new Error(u + ' ' + r.status); return r.text(); }
 
 async function buildData() {
-  const [ch, st, cat, co, lg, bl] = await Promise.all([
-    getJSON('channels'), getJSON('streams'), getJSON('categories'), getJSON('countries'),
-    getJSON('logos').catch(() => []), getJSON('blocklist').catch(() => [])
-  ]);
-  const blocked = new Set(bl.map(b => b.channel));
-  const logos = new Map();
-  for (const l of lg) if (l.channel && l.url && !logos.has(l.channel)) logos.set(l.channel, l.url);
-
-  // Flux retenus : HTTPS uniquement (sinon bloqués par le navigateur), sans en-tête spécial requis,
-  // et jamais ceux que la liste marque comme géo-bloqués.
-  const by = new Map();
-  const q = s => parseInt(s.quality) || 0;
-  for (const s of st) {
-    if (!s.channel || !s.url || !s.url.startsWith('https://')) continue;
-    if (s.referrer || s.user_agent) continue;
-    if (/geo.?block|g[eé]o.?restrict/i.test(s.title || '') || /geo.?block/i.test(s.label || '')) continue;
-    let a = by.get(s.channel); if (!a) by.set(s.channel, a = []);
-    a.push(s);
+  const map = new Map();
+  addEntries(map, parseM3U(await fetchText(PLAYLIST)), false);
+  for (const u of ls.get('zap.lists', [])) {
+    try { addEntries(map, parseM3U(await fetchText(u)), true); } catch { /* playlist perso injoignable : on l'ignore */ }
   }
   const out = [];
-  for (const c of ch) {
-    if (c.is_nsfw || c.closed || blocked.has(c.id)) continue;
-    const cats = c.categories || [];
-    if (cats.includes('xxx')) continue;
-    const ss = by.get(c.id); if (!ss) continue;
-    ss.sort((a, b) => q(b) - q(a));
-    out.push({ id: c.id, n: c.name, a: (c.alt_names || []).join(' '), c: c.country || '', k: cats, l: logos.get(c.id) || c.logo || '', u: ss.slice(0, 4).map(s => s.url) });
+  for (const c of map.values()) {
+    const ord = c.u.map((_, i) => i).sort((a, b) => c.q[b] - c.q[a]).slice(0, 4);
+    c.u = ord.map(i => c.u[i]); delete c.q;
+    c.fb = FOOT_STRONG.test(c.n) || (c.k.includes('sports') && /\b(inter|milan|ajax|juventus|napoli|roma|lazio|marseille|lyon|monaco|psg|liverpool|manchester|arsenal|chelsea|tottenham|galatasaray|fenerbah|be[sş]ikta[sş]|porto|ol)\b/i.test(c.n));
+    out.push(c);
   }
   out.sort((a, b) => a.n.localeCompare(b.n, 'fr'));
-  const usedCats = new Set(out.flatMap(c => c.k));
-  const cats = cat.filter(c => c.id !== 'xxx' && usedCats.has(c.id)).map(c => ({ id: c.id, name: CAT_FR[c.id] || c.name }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-  const usedCo = new Set(out.map(c => c.c));
-  const countries = co.filter(c => usedCo.has(c.code)).map(c => ({ code: c.code, name: c.name, flag: c.flag || '' }))
+  const catIds = [...new Set(out.flatMap(c => c.k))];
+  const cats = catIds.map(id => ({ id, name: CAT_FR[id] || id.charAt(0).toUpperCase() + id.slice(1) })).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const codes = [...new Set(out.map(c => c.c).filter(Boolean))];
+  const countries = codes.map(code => { let name = code; try { name = regionName?.of(code) || code; } catch {} return { code, name, flag: flagOf(code) }; })
     .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   return { t: Date.now(), ch: out, cats, countries };
 }
@@ -225,23 +255,23 @@ function setData(d) {
 
 async function load(force) {
   if (!force) {
-    const cached = await kvGet('data');
+    const cached = await kvGet('data2');
     if (cached?.ch?.length) {
       setData(cached);
       if (Date.now() - cached.t > 864e5) refreshQuiet();
       return;
     }
   }
-  showLoading('Chargement des chaînes…');
+  showLoading('Chargement des chaînes… (la première fois, cela peut prendre quelques secondes)');
   try {
     const d = await buildData();
-    await kvSet('data', d);
+    await kvSet('data2', d);
     setData(d);
   } catch (e) {
     showError('Impossible de charger la liste. Vérifiez votre connexion.');
   }
 }
-async function refreshQuiet() { try { const d = await buildData(); await kvSet('data', d); setData(d); } catch {} }
+async function refreshQuiet() { try { const d = await buildData(); await kvSet('data2', d); setData(d); } catch {} }
 
 /* ---------- interface liste ---------- */
 function showLoading(t) { $('#grid').innerHTML = ''; $('#count').textContent = ''; $('#foot').hidden = true; $('#state').innerHTML = `<div class="load"><div class="spin"></div><div>${esc(t)}</div></div>`; }
@@ -249,7 +279,7 @@ function showError(t) { $('#state').innerHTML = `<div class="empty">${esc(t)}<br
 
 function renderChips() {
   const d = state.data;
-  const items = [['all', 'Tout'], ['fav', 'Favoris'], ...d.cats.map(c => [c.id, c.name])];
+  const items = [['all', 'Tout'], ['fav', 'Favoris'], ['football', '⚽ Football'], ...d.cats.map(c => [c.id, c.name])];
   $('#chips').innerHTML = items.map(([id, n]) => `<button class="chip" data-cat="${esc(id)}" aria-pressed="${id === state.cat}">${esc(n)}</button>`).join('');
 }
 function renderCountries() {
@@ -263,7 +293,7 @@ function filtered() {
   const q = norm(state.q.trim());
   return state.data.ch.filter(c =>
     !bad.has(c.id) &&
-    (state.cat === 'all' || (state.cat === 'fav' ? favs.has(c.id) : c.k.includes(state.cat))) &&
+    (state.cat === 'all' || (state.cat === 'fav' ? favs.has(c.id) : state.cat === 'football' ? c.fb : c.k.includes(state.cat))) &&
     (!state.country || c.c === state.country) &&
     (!q || c._s.includes(q)));
 }
@@ -307,7 +337,17 @@ $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(
 $('#grid').addEventListener('click', e => { const b = e.target.closest('.card'); if (b) openPlayer(b.dataset.id); });
 window.addEventListener('scroll', () => $('#hd').classList.toggle('scrolled', scrollY > 4), { passive: true });
 $('#reload').onclick = () => load(true);
-$('#unhide').onclick = () => { bad.clear(); ls.set('zap.bad', []); toast('Chaînes réaffichées'); if (state.data) render(); };
+const syncLists = () => { $('#delLists').hidden = !ls.get('zap.lists', []).length; };
+$('#addList').onclick = () => {
+  const u = (prompt('Adresse d’une playlist .m3u (https://…)\nElle sera ajoutée à la liste, par exemple pour plus de football.') || '').trim();
+  if (!u) return;
+  if (!/^https:\/\//i.test(u)) { toast('L’adresse doit commencer par https://'); return; }
+  const l = ls.get('zap.lists', []); if (!l.includes(u)) l.push(u);
+  ls.set('zap.lists', l); syncLists(); toast('Playlist ajoutée, mise à jour…'); load(true);
+};
+$('#delLists').onclick = () => { ls.set('zap.lists', []); syncLists(); toast('Playlists retirées'); load(true); };
+syncLists();
+$('#unhide').onclick = () => { bad.clear(); saveBad(); toast('Chaînes réaffichées'); if (state.data) render(); };
 
 /* ---------- lecteur ---------- */
 const video = $('#v');
@@ -387,7 +427,7 @@ function fail(my) {
   clearTimeout(watchdog);
   if (cur && si + 1 < cur.u.length) { si++; playUrl(cur.u[si]); return; }
   // Aucun flux ne répond (hors ligne, géo-bloqué, supprimé…) : on masque la chaîne pour la prochaine fois.
-  if (cur) { bad.add(cur.id); ls.set('zap.bad', [...bad]); }
+  if (cur) { bad.set(cur.id, Date.now()); saveBad(); }
   const i = snap.indexOf(cur);
   const hasNext = i >= 0 && i < snap.length - 1;
   msg(`<div><b>Cette chaîne n’est pas disponible.</b><br>Elle est peut-être hors ligne ou réservée à d’autres pays.<br>Elle sera masquée de la liste.</div>${hasNext ? '<button id="skip">Chaîne suivante</button>' : ''}`);
