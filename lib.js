@@ -31,12 +31,28 @@
     return out;
   }
 
+  // Raison pour laquelle une entrée est écartée (null = elle est gardée)
+  // opts.keepGeo : ne pas écarter les chaînes « géo-bloquées » (le contrôle réel depuis votre connexion décide)
+  function dropReason(e, custom, opts) {
+    if (!e.url) return 'adresse de flux manquante';
+    if (!e.url.startsWith('https://')) return 'flux en http (non sécurisé) : bloqué par le navigateur';
+    if (e.ref) return 'exige un en-tête spécial (referrer / user-agent) : impossible dans un navigateur';
+    if (!(opts && opts.keepGeo) && /geo.?block|g[eé]o.?restrict/i.test(e.name)) return 'marquée géo-bloquée dans la playlist';
+    if (/not 24\/7/i.test(e.name)) return 'marquée « Not 24/7 » (diffusion non continue)';
+    const k = (e.attrs['group-title'] || '').toLowerCase();
+    if (k.split(';').map(s => s.trim()).includes('xxx')) return 'contenu adulte';
+    const tid = (e.attrs['tvg-id'] || '').split('@')[0];
+    let cc = ((tid.match(/\.([a-z]{2})$/i) || [])[1] || '').toUpperCase();
+    if (cc === 'UK') cc = 'GB';
+    if (!custom && !KEEP.has(cc)) return cc ? 'pays hors France / États-Unis (' + cc + ')' : 'pays inconnu (pas d\'identifiant tvg-id dans la playlist)';
+    return null;
+  }
+
   // Ajoute des entrées M3U à la table des chaînes (regroupées par identifiant).
   // Retire d'emblée : non-HTTPS, en-têtes spéciaux, géo-bloqués, « Not 24/7 », contenus adultes.
-  function addEntries(map, entries, custom) {
+  function addEntries(map, entries, custom, opts) {
     for (const e of entries) {
-      if (!e.url || !e.url.startsWith('https://') || e.ref) continue;
-      if (/geo.?block|g[eé]o.?restrict|not 24\/7/i.test(e.name)) continue;
+      if (dropReason(e, custom, opts)) continue;
       const k = (e.attrs['group-title'] || '').split(';').map(s => s.trim().toLowerCase()).filter(x => x && x !== 'undefined');
       if (k.includes('xxx')) continue;
       const title = e.name.replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim();
@@ -46,7 +62,6 @@
       const id = tid || (custom ? 'c:' : 'n:') + norm(title);
       let cc = ((tid.match(/\.([a-z]{2})$/i) || [])[1] || '').toUpperCase();
       if (cc === 'UK') cc = 'GB';
-      if (!custom && !KEEP.has(cc)) continue;
       let c = map.get(id);
       if (!c) map.set(id, c = { id, n: title, a: '', c: cc, k: [], l: e.attrs['tvg-logo'] || '', u: [], q: [], fb: false });
       if (!c.q) c.q = c.u.map(() => 0);
@@ -76,7 +91,7 @@
     return { t: Date.now(), ch: out, cats, countries };
   }
 
-  const lib = { norm, CAT_FR, parseM3U, addEntries, finalize };
+  const lib = { norm, CAT_FR, parseM3U, addEntries, finalize, dropReason };
   root.ZapLib = lib;
   if (typeof module !== 'undefined' && module.exports) module.exports = lib;
 })(typeof self !== 'undefined' ? self : globalThis);

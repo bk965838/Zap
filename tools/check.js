@@ -69,7 +69,8 @@ async function main() {
   const res = await fetch(PLAYLIST);
   if (!res.ok) throw new Error('Playlist inaccessible : ' + res.status);
   const map = new Map();
-  addEntries(map, parseM3U(await res.text()), false);
+  // Les chaînes « géo-bloquées » (ex. réservées à la France) sont gardées à l'essai : le test ci-dessous, fait depuis chez vous, tranche.
+  addEntries(map, parseM3U(await res.text()), false, { keepGeo: true });
 
   // On ne teste que les meilleurs flux de chaque chaîne
   const tasks = [];
