@@ -1,7 +1,7 @@
 // Service worker : fait démarrer l'app instantanément et la rend utilisable pour l'interface hors ligne.
 // Les flux vidéo et les données de chaînes ne passent jamais par ici.
-const VERSION = 'zap-v2';
-const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
+const VERSION = 'zap-v3';
+const SHELL = ['./', 'index.html', 'lib.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -23,9 +23,12 @@ self.addEventListener('fetch', e => {
       .catch(() => caches.match('index.html')));
     return;
   }
-  // Fichiers statiques : cache d'abord, mise à jour en arrière-plan
-  e.respondWith(caches.match(req).then(hit => {
-    const net = fetch(req).then(r => { if (r.ok) { const c = r.clone(); caches.open(VERSION).then(x => x.put(req, c)); } return r; }).catch(() => hit);
-    return hit || net;
-  }));
+  // Fichiers de l'app : réseau d'abord (toujours à jour), cache en secours hors ligne
+  if (sameOrigin) {
+    e.respondWith(fetch(req).then(r => { if (r.ok) { const c = r.clone(); caches.open(VERSION).then(x => x.put(req, c)); } return r; })
+      .catch(() => caches.match(req)));
+    return;
+  }
+  // Bibliothèque vidéo (CDN) : cache d'abord
+  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => { if (r.ok) { const c = r.clone(); caches.open(VERSION).then(x => x.put(req, c)); } return r; })));
 });

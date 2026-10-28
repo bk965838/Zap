@@ -1,0 +1,8 @@
+#EXTM3U
+# Vos chaînes en plus (Mayotte, Comores, football…). Elles s'ajoutent à la liste.
+# Une chaîne = deux lignes : la description, puis l'adresse du flux (https, finissant souvent par .m3u8).
+# tvg-id : mettez .yt pour Mayotte ou .km pour les Comores à la fin, cela classe la chaîne par pays.
+#
+# Modèle (retirez le « # » et l'espace au début des deux lignes suivantes et remplacez les valeurs) :
+# #EXTINF:-1 tvg-id="MaChaine.yt" tvg-logo="https://exemple.fr/logo.png" group-title="General",Nom de la chaîne
+# https://exemple.fr/flux/index.m3u8
