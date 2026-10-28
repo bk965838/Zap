@@ -240,23 +240,23 @@ function setData(d) {
 
 async function load(force) {
   if (!force) {
-    const cached = await kvGet('data2');
+    const cached = await kvGet('data3');
     if (cached?.ch?.length) {
       setData(cached);
-      if (Date.now() - cached.t > 864e5) refreshQuiet();
+      if (Date.now() - cached.t > 216e5) refreshQuiet();
       return;
     }
   }
   showLoading('Chargement des chaînes… (la première fois, cela peut prendre quelques secondes)');
   try {
     const d = await buildData();
-    await kvSet('data2', d);
+    await kvSet('data3', d);
     setData(d);
   } catch (e) {
     showError('Impossible de charger la liste. Vérifiez votre connexion.');
   }
 }
-async function refreshQuiet() { try { const d = await buildData(); await kvSet('data2', d); setData(d); } catch {} }
+async function refreshQuiet() { try { const d = await buildData(); await kvSet('data3', d); setData(d); } catch {} }
 
 /* ---------- interface liste ---------- */
 function showLoading(t) { $('#grid').innerHTML = ''; $('#count').textContent = ''; $('#foot').hidden = true; $('#state').innerHTML = `<div class="load"><div class="spin"></div><div>${esc(t)}</div></div>`; }
