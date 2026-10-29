@@ -35,7 +35,7 @@
   // opts.keepGeo : ne pas écarter les chaînes « géo-bloquées » (le contrôle réel depuis votre connexion décide)
   function dropReason(e, custom, opts) {
     if (!e.url) return 'adresse de flux manquante';
-    if (!/^https?:\/\//i.test(e.url)) return 'adresse de flux invalide (http:// ou https:// requis)';
+    if (!e.url.startsWith('https://')) return 'flux en http (non sécurisé) : bloqué par le navigateur';
     if (e.ref) return 'exige un en-tête spécial (referrer / user-agent) : impossible dans un navigateur';
     if (!(opts && opts.keepGeo) && /geo.?block|g[eé]o.?restrict/i.test(e.name)) return 'marquée géo-bloquée dans la playlist';
     if (/not 24\/7/i.test(e.name)) return 'marquée « Not 24/7 » (diffusion non continue)';
