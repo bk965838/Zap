@@ -325,9 +325,9 @@ window.addEventListener('scroll', () => $('#hd').classList.toggle('scrolled', sc
 $('#reload').onclick = () => load(true);
 const syncLists = () => { $('#delLists').hidden = !ls.get('zap.lists', []).length; };
 $('#addList').onclick = () => {
-  const u = (prompt('Adresse d’une playlist .m3u (https://…)\nElle sera ajoutée à la liste, par exemple pour plus de football.') || '').trim();
+  const u = (prompt('Adresse d’une playlist .m3u (http://… ou https://…)\nElle sera ajoutée à la liste, par exemple pour plus de football.') || '').trim();
   if (!u) return;
-  if (!/^https:\/\//i.test(u)) { toast('L’adresse doit commencer par https://'); return; }
+  if (!/^https?:\/\//i.test(u)) { toast('L’adresse doit commencer par http:// ou https://'); return; }
   const l = ls.get('zap.lists', []); if (!l.includes(u)) l.push(u);
   ls.set('zap.lists', l); syncLists(); toast('Playlist ajoutée, mise à jour…'); load(true);
 };
